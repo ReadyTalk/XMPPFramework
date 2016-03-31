@@ -53,6 +53,7 @@ s.subspec 'Core' do |core|
     'OTHER_SWIFT_FLAGS' => "$(inherited) -DDDXML_LIBXML_MODULE_ENABLED"
 }
   core.dependency 'CocoaLumberjack','~>2.0'
+  core.dependency 'SocketRocket','~> 0.5'
   core.dependency 'CocoaAsyncSocket','~>7.4.1'
   core.dependency 'KissXML/libxml_module', '~> 5.0.3'
 end

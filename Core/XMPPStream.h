@@ -4,6 +4,7 @@
 #import "GCDMulticastDelegate.h"
 #import "CocoaAsyncSocket/GCDAsyncSocket.h"
 
+@import SocketRocket;
 @import KissXML;
 
 @class XMPPSRVResolver;
@@ -43,7 +44,7 @@ typedef NS_ENUM(NSUInteger, XMPPStreamStartTLSPolicy) {
 
 extern const NSTimeInterval XMPPStreamTimeoutNone;
 
-@interface XMPPStream : NSObject <GCDAsyncSocketDelegate>
+@interface XMPPStream : NSObject <GCDAsyncSocketDelegate, SRWebSocketDelegate>
 
 /**
  * Standard XMPP initialization.
@@ -75,6 +76,10 @@ extern const NSTimeInterval XMPPStreamTimeoutNone;
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 #pragma mark Properties
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+@property (strong, atomic) SRWebSocket *webSocket;
+
+@property (strong, nonatomic) NSString *authenticationToken;
 
 /**
  * The server's hostname that should be used to make the TCP connection.
@@ -304,6 +309,12 @@ extern const NSTimeInterval XMPPStreamTimeoutNone;
  * If the hostName or myJID are not set, this method will return NO and set the error parameter.
 **/
 - (BOOL)connectWithTimeout:(NSTimeInterval)timeout error:(NSError **)errPtr;
+
+/**
+ * Connect via websocket to a the hostName. The configured hostPort is not used.
+ * This will send all communications over websocket instead of raw socket.
+ **/
+- (void)connectWebSocket;
 
 /**
  * THIS IS DEPRECATED BY THE XMPP SPECIFICATION.

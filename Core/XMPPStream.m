@@ -92,6 +92,9 @@ enum XMPPStreamConfig
 	GCDMulticastDelegate <XMPPStreamDelegate> *multicastDelegate;
 	
 	XMPPStreamState state;
+    XMPPStreamState webSocketState;
+    
+    NSMutableSet *wsRequestFeatures;
 	
 	GCDAsyncSocket *asyncSocket;
 	
@@ -178,6 +181,8 @@ enum XMPPStreamConfig
 	multicastDelegate = (GCDMulticastDelegate <XMPPStreamDelegate> *)[[GCDMulticastDelegate alloc] init];
 	
 	state = STATE_XMPP_DISCONNECTED;
+    wsRequestFeatures = [[NSMutableSet alloc] init];
+    webSocketState = STATE_XMPP_DISCONNECTED
 	
 	flags = 0;
 	config = 0;
@@ -1036,6 +1041,18 @@ enum XMPPStreamConfig
 	
 	XMPPLogTrace();
 	
+    if (self.webSocket) {
+        NSMutableURLRequest *request = [[NSMutableURLRequest alloc] initWithURL:[NSURL URLWithString:hostName]];
+        [request addValue:@"xmpp" forHTTPHeaderField:@"Sec-WebSocket-Protocol"];
+        
+        state = STATE_XMPP_CONNECTING;
+        
+        self.webSocket = [[SRWebSocket alloc] initWithURLRequest:request];
+        self.webSocket.delegate = self;
+        [self.webSocket open];
+        return true;
+    }
+    
 	BOOL result = [asyncSocket connectToHost:host onPort:port error:errPtr];
 	
 	if (result && [self resetByteCountPerConnection])
@@ -1196,6 +1213,28 @@ enum XMPPStreamConfig
 		*errPtr = err;
 	
 	return result;
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+#pragma mark WebSocket Connection
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+- (void)connectWebSocket {
+    dispatch_block_t block = ^{ @autoreleasepool {
+        NSMutableURLRequest *request = [[NSMutableURLRequest alloc] initWithURL:[NSURL URLWithString:hostName]];
+        [request addValue:@"xmpp" forHTTPHeaderField:@"Sec-WebSocket-Protocol"];
+        
+        state = STATE_XMPP_CONNECTING;
+        
+        self.webSocket = [[SRWebSocket alloc] initWithURLRequest:request];
+        self.webSocket.delegate = self;
+        [self.webSocket open];
+    }};
+    
+    if (dispatch_get_specific(xmppQueueTag))
+        block();
+    else
+        dispatch_sync(xmppQueue, block);
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1401,7 +1440,13 @@ enum XMPPStreamConfig
 			}
 			else
 			{
-				[asyncSocket disconnect];
+                webSocketState = STATE_XMPP_DISCONNECTED;
+                if (self.webSocket != nil) {
+                    [self.webSocket close];
+                    self.webSocket = nil;
+                } else {
+                    [asyncSocket disconnect];
+                }
 				
 				// Everthing will be handled in socketDidDisconnect:withError:
 			}
@@ -1441,8 +1486,16 @@ enum XMPPStreamConfig
 				XMPPLogSend(@"SEND: %@", termStr);
 				numberOfBytesSent += [termData length];
 				
-				[asyncSocket writeData:termData withTimeout:TIMEOUT_XMPP_WRITE tag:TAG_XMPP_WRITE_STOP];
-				[asyncSocket disconnectAfterWriting];
+                if (self.webSocket != nil) {
+                    if (self.webSocket.readyState == SR_OPEN){
+                        [self.webSocket send:termData];
+                    }
+                    [self.webSocket close];
+                    self.webSocket = nil;
+                } else {
+                    [asyncSocket writeData:termData withTimeout:TIMEOUT_XMPP_WRITE tag:TAG_XMPP_WRITE_STOP];
+                    [asyncSocket disconnectAfterWriting];
+                }
 				
 				// Everthing will be handled in socketDidDisconnect:withError:
 			}
@@ -2420,9 +2473,13 @@ enum XMPPStreamConfig
 	XMPPLogSend(@"SEND: %@", outgoingStr);
 	numberOfBytesSent += [outgoingData length];
 	
-	[asyncSocket writeData:outgoingData
-	           withTimeout:TIMEOUT_XMPP_WRITE
-	                   tag:tag];
+    if (self.webSocket != nil) {
+        [self.webSocket send:outgoingStr];
+    } else {
+        [asyncSocket writeData:outgoingData
+                   withTimeout:TIMEOUT_XMPP_WRITE
+                           tag:tag];
+    }
 	
 	[multicastDelegate xmppStream:self didSendIQ:iq];
 }
@@ -2438,9 +2495,13 @@ enum XMPPStreamConfig
 	XMPPLogSend(@"SEND: %@", outgoingStr);
 	numberOfBytesSent += [outgoingData length];
 	
-	[asyncSocket writeData:outgoingData
-	           withTimeout:TIMEOUT_XMPP_WRITE
-	                   tag:tag];
+    if (self.webSocket != nil) {
+        [self.webSocket send:outgoingStr];
+    } else {
+        [asyncSocket writeData:outgoingData
+                   withTimeout:TIMEOUT_XMPP_WRITE
+                           tag:tag];
+    }
 	
 	[multicastDelegate xmppStream:self didSendMessage:message];
 }
@@ -2456,9 +2517,13 @@ enum XMPPStreamConfig
 	XMPPLogSend(@"SEND: %@", outgoingStr);
 	numberOfBytesSent += [outgoingData length];
 	
-	[asyncSocket writeData:outgoingData
-	           withTimeout:TIMEOUT_XMPP_WRITE
-	                   tag:tag];
+    if (self.webSocket != nil) {
+        [self.webSocket send:outgoingStr];
+    } else {
+        [asyncSocket writeData:outgoingData
+                   withTimeout:TIMEOUT_XMPP_WRITE
+                           tag:tag];
+    }
 	
 	// Update myPresence if this is a normal presence element.
 	// In other words, ignore presence subscription stuff, MUC room stuff, etc.
@@ -4127,15 +4192,177 @@ enum XMPPStreamConfig
 
 - (void)xmppSRVResolver:(XMPPSRVResolver *)sender didNotResolveDueToError:(NSError *)error
 {
-	NSAssert(dispatch_get_specific(xmppQueueTag), @"Invoked on incorrect queue");
-	
-	if (sender != srvResolver) return;
-	
-	XMPPLogTrace();
-	
-	state = STATE_XMPP_CONNECTING;
-	
-	[self tryNextSrvResult];
+    NSAssert(dispatch_get_specific(xmppQueueTag), @"Invoked on incorrect queue");
+    
+    if (sender != srvResolver) return;
+    
+    XMPPLogTrace();
+    
+    state = STATE_XMPP_CONNECTING;
+    
+    [self tryNextSrvResult];
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+#pragma mark SRWebSocket Delegate
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+-(void)webSocketDidOpen:(SRWebSocket *)webSocket {
+    XMPPLogInfo(@"webSocketDidOpen");
+    parser = [[XMPPParser alloc] initWithDelegate:self delegateQueue:xmppQueue];
+    
+    [self sendStreamInitialization];
+    
+    state = STATE_XMPP_CONNECTED;
+    webSocketState = STATE_XMPP_NEGOTIATING;
+    
+    [multicastDelegate xmppStreamDidConnect:self];
+}
+
+- (void)webSocket:(SRWebSocket *)webSocket didFailWithError:(NSError *)error {
+    state = STATE_XMPP_DISCONNECTED;
+    
+    XMPPLogError(@"webSocketDidFail error %@", error);
+    [multicastDelegate xmppStreamDidDisconnect:self withError:error];
+}
+
+- (void)webSocket:(SRWebSocket *)webSocket didCloseWithCode:(NSInteger)code reason:(NSString *)reason wasClean:(BOOL)wasClean {
+    state = STATE_XMPP_DISCONNECTED;
+    
+    XMPPLogInfo(@"webSocketDidClose");
+    NSError *error;
+    
+    // We did not disconnect this socket. There seems to be a bug where wasClean is always false
+    // If the websocket state is disconnected, we know we initiated this request and wasClean doesn't matter
+    if (!wasClean && webSocketState != STATE_XMPP_DISCONNECTED) {
+        error = [[NSError alloc] initWithDomain:SRWebSocketErrorDomain code:code userInfo:@{NSLocalizedDescriptionKey:reason}];
+    }
+    XMPPLogInfo(@"Websocket uncleanly closed? %@", error);
+    [multicastDelegate xmppStreamDidDisconnect:self withError:error];
+}
+
+-(void)webSocket:(SRWebSocket *)webSocket didReceiveMessage:(id)message {
+    dispatch_block_t block = ^{ @autoreleasepool {
+        NSString *strMessage = (NSString *)message;
+        
+        if (webSocketState != STATE_XMPP_CONNECTED) {
+            XMPPLogVerbose(@"\nRECV: %@", strMessage);
+            if ([strMessage containsString:@"mechanisms"] && [strMessage containsString:@"xmlns='urn:ietf:params:xml:ns:xmpp-sasl'"]) {
+                [self parseStreamMechanisms:strMessage];
+            }
+            
+            if ([strMessage containsString:@"success"] && [strMessage containsString:@"xmlns='urn:ietf:params:xml:ns:xmpp-sasl'"]) {
+                [self openNewStream];
+            }
+            
+            if ([strMessage containsString:@"stream:features"] && ![strMessage containsString:@"mechanisms"]) {
+                [self parseStreamFeatures:strMessage];
+            }
+            
+            if ([strMessage containsString:@"type='result'"]) {
+                [self parseSuccessFulConnection:strMessage];
+            }
+            
+            if ([strMessage containsString:@"failure"]) {
+                NSError *error = [[NSError alloc] initWithDomain:XMPPStreamErrorDomain code:403 userInfo:nil];
+                [multicastDelegate xmppStreamDidDisconnect:self withError:error];
+            }
+            
+        } else {
+            DDXMLElement *element = [[DDXMLElement alloc] initWithXMLString:strMessage error:nil];
+            [self xmppParser:parser didReadElement:element];
+        }
+    }};
+    if (dispatch_get_specific(xmppQueueTag))
+        block();
+    else
+        dispatch_sync(xmppQueue, block);
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+#pragma mark SRWebSocket Parsing
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+- (void)parseStreamMechanisms:(NSString *)receivedString {
+    if ([receivedString containsString:@"ANONYMOUS"]) {
+        [self requestAnonymousAuth];
+    } else if ([receivedString containsString:@"PLAIN"]) {
+        [self requestPlainAuth];
+    }
+}
+
+- (void)parseStreamFeatures:(NSString *)receivedString {
+    if ([receivedString containsString:@"bind xmlns='urn:ietf:params:xml:ns:xmpp-bind'"]) {
+        [self requestBindResourceCreation];
+    }
+    
+    if ([receivedString containsString:@"session xmlns='urn:ietf:params:xml:ns:xmpp-session'"]) {
+        [self requestSessionResourceCreation];
+    }
+}
+
+- (void)parseSuccessFulConnection:(NSString *)receivedString {
+    for (NSString *requestId in [wsRequestFeatures allObjects]) {
+        if ([receivedString containsString:requestId]) {
+            [wsRequestFeatures removeObject:requestId];
+        }
+    }
+    
+    if ([receivedString containsString:@"<jid>"]) {
+        NSRange r1 = [receivedString rangeOfString:@"<jid>"];
+        NSRange r2 = [receivedString rangeOfString:@"</jid>"];
+        NSRange subRange = NSMakeRange(r1.location + r1.length, r2.location - r1.location - r1.length);
+        NSString *myJID = [receivedString substringWithRange:subRange];
+        [self setMyJID_setByServer:[XMPPJID jidWithString:myJID]];
+    }
+    
+    if ([wsRequestFeatures count] == 0) {
+        webSocketState = STATE_XMPP_CONNECTED;
+        [multicastDelegate xmppStreamDidAuthenticate:self];
+    }
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+#pragma mark SRWebSocket Authentication
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+- (void)sendStreamInitialization {
+    NSString *outgoingStr = [NSString stringWithFormat:@"<stream:stream xmlns='jabber:client' xmlns:stream='http://etherx.jabber.org/streams' xmlns:sasl='http://www.iana.org/assignments/sasl-mechanisms' version='1.0' to='%@'>", [myJID_setByClient domain]];
+    XMPPLogSend(@"SEND: %@", outgoingStr);
+    [self.webSocket send:outgoingStr];
+}
+
+- (void)requestPlainAuth {
+    assert(self.authenticationToken);
+    NSString *outgoingStr = [NSString stringWithFormat:@"<auth xmlns='urn:ietf:params:xml:ns:xmpp-sasl' mechanism='PLAIN'>%@</auth>", self.authenticationToken];
+    XMPPLogSend(@"SEND: %@", outgoingStr);
+    [self.webSocket send:outgoingStr];
+}
+
+- (void)requestAnonymousAuth {
+    NSString *outgoingStr = @"<auth xmlns='urn:ietf:params:xml:ns:xmpp-sasl' mechanism='ANONYMOUS'/>";
+    XMPPLogSend(@"SEND: %@", outgoingStr);
+    [self.webSocket send:outgoingStr];
+}
+
+- (void)openNewStream {
+    NSString *outgoingStr = [NSString stringWithFormat:@"<stream:stream xmlns:stream='http://etherx.jabber.org/streams' xmlns='jabber:client' to='%@' version='1.0'>", [myJID_setByClient domain]];
+    XMPPLogSend(@"SEND: %@", outgoingStr);
+    [self.webSocket send:outgoingStr];
+}
+
+- (void)requestBindResourceCreation {
+    [wsRequestFeatures addObject:@"bind_1"];
+    NSString *outgoingStr = @"<iq type='set' id='bind_1'><bind xmlns='urn:ietf:params:xml:ns:xmpp-bind'/></iq>";
+    XMPPLogSend(@"SEND: %@", outgoingStr);
+    [self.webSocket send:outgoingStr];
+}
+
+- (void)requestSessionResourceCreation {
+    [wsRequestFeatures addObject:@"_session_auth_2"];
+    NSString *outgoingStr = @"<iq type='set' id='_session_auth_2' xmlns='jabber:client'><session xmlns='urn:ietf:params:xml:ns:xmpp-session'/></iq>";
+    XMPPLogSend(@"SEND: %@", outgoingStr);
+    [self.webSocket send:outgoingStr];
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////

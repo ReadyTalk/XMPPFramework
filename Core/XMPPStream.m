@@ -182,7 +182,7 @@ enum XMPPStreamConfig
 	
 	state = STATE_XMPP_DISCONNECTED;
     wsRequestFeatures = [[NSMutableSet alloc] init];
-    webSocketState = STATE_XMPP_DISCONNECTED
+    webSocketState = STATE_XMPP_DISCONNECTED;
 	
 	flags = 0;
 	config = 0;

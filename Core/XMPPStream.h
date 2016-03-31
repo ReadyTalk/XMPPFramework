@@ -3,8 +3,9 @@
 #import "XMPPCustomBinding.h"
 #import "GCDMulticastDelegate.h"
 #import "CocoaAsyncSocket/GCDAsyncSocket.h"
+#import "SocketRocket/SRWebSocket.h"
 
-@import SocketRocket;
+//@import SocketRocket;
 @import KissXML;
 
 @class XMPPSRVResolver;

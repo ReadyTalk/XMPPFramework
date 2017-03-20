@@ -6,9 +6,9 @@
 //  Copyright © 2016 Inaka. All rights reserved.
 //
 
-#import <XMPPFramework/XMPPFramework.h>
-#import <XMPPFramework/XMPPIDTracker.h>
-#import <XMPPFramework/XMPPJID.h>
+#import "XMPP.h"
+#import "XMPPIDTracker.h"
+#import "XMPPJID.h"
 
 @protocol XMPPRoomLightStorage;
 
@@ -38,7 +38,7 @@
 - (void)changeAffiliations:(nonnull NSArray<NSXMLElement *> *)members;
 - (void)getConfiguration;
 - (void)setConfiguration:(nonnull NSArray<NSXMLElement *> *)configs;
-
+- (void)flushVersion;
 @end
 
 @protocol XMPPRoomLightStorage <NSObject>

@@ -8,8 +8,25 @@
 
 #import <XCTest/XCTest.h>
 #import "XMPPMockStream.h"
-#import "XMPPMUCLight.h"
-#import "XMPPRoomLight.h"
+
+// This is a Mock class to make test run faster. We need a delay when we
+// are working over a real XMPPServer, but in tests it makes no sense to
+// wait that long. This mock is only used in "testRoomsCountRemoval"
+
+@interface XMPPMUCLightMock: XMPPMUCLight
+- (double) delayInSeconds;
+@end
+
+@implementation XMPPMUCLightMock
+
+- (double) delayInSeconds {
+	return 1;
+}
+
+@end
+
+////////////////////////////////////////////////////////////////////////
+
 
 @interface XMPPMUCLightTests: XCTestCase <XMPPMUCLightDelegate>
 
@@ -32,7 +49,7 @@
 	self.roomsCountExpectation = [self expectationWithDescription:@"Count"];
 
 	XMPPMockStream *streamTest = [[XMPPMockStream alloc] init];
-	XMPPMUCLight *mucLight = [[XMPPMUCLight alloc] init];
+	XMPPMUCLightMock *mucLight = [[XMPPMUCLightMock alloc] init];
 
 	[mucLight addDelegate:self delegateQueue:dispatch_get_main_queue()];
 	[mucLight activate:streamTest];
@@ -40,16 +57,19 @@
 	XMPPRoomLight *roomLight = [[XMPPRoomLight alloc] initWithJID:[XMPPJID jidWithString:@"test@test.com"] roomname:@"test name"];
 	[roomLight activate:streamTest];
 
-	dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+	dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
 		[roomLight deactivate];
 	});
 
-	dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(38 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+	// after calling to deactivate xmppStream:willUnregisterModule: implementation
+	// from XMPPMUCLightMock is going to take 1 second to actually remove the room
+	// from the set of rooms, so waiting 3 seconds would be enought.
+	dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
 		XCTAssertTrue([[mucLight.rooms allObjects] count] == 0);
 		[self.roomsCountExpectation fulfill];
 	});
 
-	[self waitForExpectationsWithTimeout:60 handler:^(NSError * _Nullable error) {
+	[self waitForExpectationsWithTimeout:6 handler:^(NSError * _Nullable error) {
 		if(error){
 			XCTFail(@"Expectation Failed with error: %@", error);
 		}
@@ -112,7 +132,7 @@
 	}];
 }
 
-- (void) xmppMUCLight:(XMPPMUCLight *)sender didRequestBlockingList:(NSArray<DDXMLElement *> *)items forServiceNamed:(NSString *)serviceName{
+- (void) xmppMUCLight:(XMPPMUCLight *)sender didRequestBlockingList:(NSArray<NSXMLElement *> *)items forServiceNamed:(NSString *)serviceName{
 	XCTAssertEqual(items.count, 2);
 	XCTAssertEqualObjects(serviceName, @"muclight.test.com");
 	[self.delegateResponseExpectation fulfill];

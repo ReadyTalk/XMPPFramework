@@ -2,18 +2,16 @@ Pod::Spec.new do |s|
   s.name = 'XMPPFramework'
   s.version = '3.7.0'
 
-  s.osx.deployment_target = '10.8'
+  s.osx.deployment_target = '10.9'
   s.ios.deployment_target = '8.0'
-
-#  tvOS support is blocked by libidn
-#  s.tvos.deployment_target = '9.0'
+  s.tvos.deployment_target = '9.0'
 
   s.license = { :type => 'BSD', :file => 'copying.txt' }
   s.summary = 'An XMPP Framework in Objective-C for the Mac / iOS development community.'
   s.homepage = 'https://github.com/robbiehanson/XMPPFramework'
   s.author = { 'Robbie Hanson' => 'robbiehanson@deusty.com' }
-#  s.source = { :git => 'https://github.com/robbiehanson/XMPPFramework.git', :tag => s.version }
-s.source = { :git => 'https://github.com/robbiehanson/XMPPFramework.git', :branch => 'master' }
+  s.source = { :git => 'https://github.com/robbiehanson/XMPPFramework.git', :tag => s.version }
+  # s.source = { :git => 'https://github.com/robbiehanson/XMPPFramework.git', :branch => 'master' }
   s.resources = [ '**/*.{xcdatamodel,xcdatamodeld}']
 
   s.description = 'XMPPFramework provides a core implementation of RFC-3920 (the xmpp standard), along with
@@ -352,54 +350,17 @@ s.source = { :git => 'https://github.com/robbiehanson/XMPPFramework.git', :branc
     ss.prefix_header_contents = "#define HAVE_XMPP_SUBSPEC_#{name.upcase.sub('-', '_')}"
   end
 
-  s.subspec 'All' do |ss|
-    ss.dependency 'XMPPFramework/Core'
-    ss.dependency 'XMPPFramework/BandwidthMonitor'
-    ss.dependency 'XMPPFramework/CoreDataStorage'
-    ss.dependency 'XMPPFramework/FileTransfer'
-    ss.dependency 'XMPPFramework/GoogleSharedStatus'
-    ss.dependency 'XMPPFramework/ProcessOne'
-    ss.dependency 'XMPPFramework/Reconnect'
-    ss.dependency 'XMPPFramework/Roster'
-    ss.osx.dependency 'XMPPFramework/SystemInputActivityMonitor'
-    ss.dependency 'XMPPFramework/XEP-0009'
-    ss.dependency 'XMPPFramework/XEP-0012'
-    ss.dependency 'XMPPFramework/XEP-0016'
-    ss.dependency 'XMPPFramework/XEP-0045'
-    ss.dependency 'XMPPFramework/XEP-0054'
-    ss.dependency 'XMPPFramework/XEP-0059'
-    ss.dependency 'XMPPFramework/XEP-0060'
-    ss.dependency 'XMPPFramework/XEP-0065'
-    ss.dependency 'XMPPFramework/XEP-0066'
-    ss.dependency 'XMPPFramework/XEP-0077'
-    ss.dependency 'XMPPFramework/XEP-0082'
-    ss.dependency 'XMPPFramework/XEP-0085'
-    ss.dependency 'XMPPFramework/XEP-0092'
-    ss.dependency 'XMPPFramework/XEP-0100'
-    ss.dependency 'XMPPFramework/XEP-0106'
-    ss.dependency 'XMPPFramework/XEP-0115'
-    ss.dependency 'XMPPFramework/XEP-0136'
-    ss.dependency 'XMPPFramework/XEP-0147'
-    ss.dependency 'XMPPFramework/XEP-0153'
-    ss.dependency 'XMPPFramework/XEP-0172'
-    ss.dependency 'XMPPFramework/XEP-0184'
-    ss.dependency 'XMPPFramework/XEP-0191'
-    ss.dependency 'XMPPFramework/XEP-0198'
-    ss.dependency 'XMPPFramework/XEP-0199'
-    ss.dependency 'XMPPFramework/XEP-0202'
-    ss.dependency 'XMPPFramework/XEP-0203'
-    ss.dependency 'XMPPFramework/XEP-0223'
-    ss.dependency 'XMPPFramework/XEP-0224'
-    ss.dependency 'XMPPFramework/XEP-0280'
-    ss.dependency 'XMPPFramework/XEP-0297'
-    ss.dependency 'XMPPFramework/XEP-0308'
-    ss.dependency 'XMPPFramework/XEP-0333'
-    ss.dependency 'XMPPFramework/XEP-0334'
-    ss.dependency 'XMPPFramework/XEP-0335'
-    ss.dependency 'XMPPFramework/XEP-0352'
-    ss.dependency 'XMPPFramework/XEP-0357'
-    ss.dependency 'XMPPFramework/XEP-0363'
-    ss.dependency 'XMPPFramework/XEP-0313'
-    ss.dependency 'XMPPFramework/XMPPMUCLight'
-  end
+  s.source_files = ['Core/**/*.{h,m}',
+                    'Authentication/**/*.{h,m}', 'Categories/**/*.{h,m}',
+                    'Utilities/**/*.{h,m}', 'Extensions/**/*.{h,m}']
+  s.ios.exclude_files = 'Extensions/SystemInputActivityMonitor/**/*.{h,m}'
+  s.libraries = 'xml2', 'resolv'
+  s.frameworks = 'CoreData', 'SystemConfiguration', 'CoreLocation'
+  s.xcconfig = {
+    'HEADER_SEARCH_PATHS' => '$(SDKROOT)/usr/include/libxml2 $(SDKROOT)/usr/include/libresolv',
+  }
+  s.dependency 'CocoaLumberjack' # Skip pinning version because of the awkward 2.x->3.x transition
+  s.dependency 'CocoaAsyncSocket', '~> 7.6.0'
+  s.dependency 'KissXML', '~> 5.2.0'
+  s.dependency 'libidn', '~> 1.33.0'
 end

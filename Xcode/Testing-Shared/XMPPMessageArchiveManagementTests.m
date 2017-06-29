@@ -92,6 +92,30 @@
 	}];
 }
 
+- (void)testRetrieveTargetedMessageArchive {
+    XCTestExpectation *expectation = [self expectationWithDescription:@"Handler IQ with \"to\""];
+    
+    XMPPJID *archiveJID = [XMPPJID jidWithString:@"test.archive@erlang-solutions.com"];
+    
+    XMPPMockStream *streamTest = [[XMPPMockStream alloc] init];
+    streamTest.elementReceived = ^void(NSXMLElement *element) {
+        XMPPIQ *iq = [XMPPIQ iqFromElement:element];
+        XCTAssertEqualObjects([iq to], archiveJID);
+        
+        [expectation fulfill];
+    };
+    
+    XMPPMessageArchiveManagement *messageArchiveManagement = [[XMPPMessageArchiveManagement alloc] init];
+    [messageArchiveManagement activate:streamTest];
+    [messageArchiveManagement retrieveMessageArchiveAt:archiveJID withFields:nil withResultSet:nil];
+    
+    [self waitForExpectationsWithTimeout:1 handler:^(NSError * _Nullable error) {
+        if(error){
+            XCTFail(@"Expectation Failed with error: %@", error);
+        }
+    }];
+}
+
 - (void)testDelegateDidReceiveMAMMessage {
 	self.delegateExpectation = [self expectationWithDescription:@"Delegate"];
 	
@@ -245,6 +269,41 @@
 
 - (void)xmppMessageArchiveManagement:(XMPPMessageArchiveManagement *)xmppMessageArchiveManagement didFailToReceiveFormFields:(XMPPIQ *)iq {
 	[self.delegateExpectation fulfill];
+}
+
+- (void)testResultAutomaticPaging {
+    XCTestExpectation *expectation = [self expectationWithDescription:@"Next page IQ"];
+    
+    NSInteger pageSize = 10;
+    
+    XMPPMockStream *streamTest = [[XMPPMockStream alloc] init];
+    __weak XMPPMockStream *weakStreamTest = streamTest;
+    streamTest.elementReceived = ^void(NSXMLElement *element) {
+        XMPPIQ *iq = [XMPPIQ iqFromElement:element];
+        NSXMLElement *query = [iq elementForName:@"query"];
+        
+        XMPPResultSet *resultSet = [XMPPResultSet resultSetFromElement:[[query elementsForLocalName:@"set" URI:@"http://jabber.org/protocol/rsm"] firstObject]];
+        if (!resultSet) {
+            [weakStreamTest fakeIQResponse:[self fakeIQWithID:[iq elementID]]];
+            return;
+        }
+        
+        XCTAssertEqual(pageSize, resultSet.max);
+        XCTAssertEqualObjects(@"09af3-cc343-b409f", resultSet.after);
+        
+        [expectation fulfill];
+    };
+    
+    XMPPMessageArchiveManagement *messageArchiveManagement = [[XMPPMessageArchiveManagement alloc] init];
+    messageArchiveManagement.resultAutomaticPagingPageSize = pageSize;
+    [messageArchiveManagement activate:streamTest];
+    [messageArchiveManagement retrieveMessageArchiveWithFields:nil withResultSet:nil];
+    
+    [self waitForExpectationsWithTimeout:1 handler:^(NSError * _Nullable error) {
+        if(error){
+            XCTFail(@"Expectation Failed with error: %@", error);
+        }
+    }];
 }
 
 - (XMPPMessage *)fakeMessageWithQueryID:(NSString *)queryID eid:(NSString*)eid{

@@ -16,6 +16,7 @@ static NSString *const XMPPRoomLightDestroy = @"urn:xmpp:muclight:0#destroy";
 @interface XMPPRoomLight() {
 	NSString *roomname;
 	NSString *subject;
+    NSArray<NSXMLElement*> *knownMembersList;
 	NSString *configVersion;
 	NSString *memberListVersion;
 }
@@ -41,6 +42,7 @@ static NSString *const XMPPRoomLightDestroy = @"urn:xmpp:muclight:0#destroy";
 		_domain = aRoomJID.domain;
 		_roomJID = aRoomJID;
 		roomname = aRoomname;
+        knownMembersList = @[];
 		configVersion = @"";
 		memberListVersion = @"";
 	}
@@ -87,6 +89,20 @@ static NSString *const XMPPRoomLightDestroy = @"urn:xmpp:muclight:0#destroy";
 	}
 }
 
+- (NSArray<NSXMLElement *> *)knownMembersList {
+    __block NSArray<NSXMLElement *> *result;
+    dispatch_block_t block = ^{ @autoreleasepool {
+        result = knownMembersList;
+    }};
+    
+    if (dispatch_get_specific(moduleQueueTag))
+        block();
+    else
+        dispatch_sync(moduleQueue, block);
+    
+    return result;
+}
+
 - (nonnull NSString *)configVersion {
 	@synchronized(subject) {
 		return [configVersion copy];
@@ -129,6 +145,17 @@ static NSString *const XMPPRoomLightDestroy = @"urn:xmpp:muclight:0#destroy";
 		block();
 	else
 		dispatch_async(moduleQueue, block);
+}
+
+- (void)setKnownMembersList:(NSArray<NSXMLElement *> *)aMembersList {
+    dispatch_block_t block = ^{ @autoreleasepool {
+        knownMembersList = [aMembersList copy];
+    }};
+    
+    if (dispatch_get_specific(moduleQueueTag))
+        block();
+    else
+        dispatch_async(moduleQueue, block);
 }
 
 - (void)setMemberListVersion:(NSString *)aVersion{
@@ -190,15 +217,15 @@ static NSString *const XMPPRoomLightDestroy = @"urn:xmpp:muclight:0#destroy";
 		NSXMLElement *configuration = [NSXMLElement elementWithName:@"configuration"];
 		[configuration addChild:[NSXMLElement elementWithName:@"roomname" stringValue:roomname]];
 		
-		NSXMLElement *ocupants = [NSXMLElement elementWithName:@"ocupants"];
+		NSXMLElement *occupants = [NSXMLElement elementWithName:@"occupants"];
 		for (XMPPJID *jid in members){
 			NSXMLElement *userElement = [NSXMLElement elementWithName:@"user" stringValue:jid.bare];
 			[userElement addAttributeWithName:@"affiliation" stringValue:@"member"];
-			[ocupants addChild:userElement];
+			[occupants addChild:userElement];
 		}
 		
 		[query addChild:configuration];
-		[query addChild:ocupants];
+		[query addChild:occupants];
 		
 		[iq addChild:query];
 		
@@ -368,9 +395,11 @@ static NSString *const XMPPRoomLightDestroy = @"urn:xmpp:muclight:0#destroy";
 		}
 		
 		NSArray *items = [query elementsForName:@"user"];
-		if (!items) { items = @[]; }
+        if (items) {
+            [self setKnownMembersList:items];
+        }
 
-		[multicastDelegate xmppRoomLight:self didFetchMembersList:items];
+		[multicastDelegate xmppRoomLight:self didFetchMembersList:iq];
 	}else{
 		[multicastDelegate xmppRoomLight:self didFailToFetchMembersList:iq];
 	}
